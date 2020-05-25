@@ -14,12 +14,16 @@ def main():
     def path_prehook(path):
         return path.replace("/pet/", "/")
 
+    def url_prehook(url):
+        return url.replace(":8000", "")
+
     option = {
         "exclude_path_regex": ["/user/post"],
         #'include_path_regex': ['get'],
         "prehooks": {
             # "path": path_prehook,
-            "response": json.dumps
+            "url": url_prehook,
+            "response": json.dumps,
         },
     }
 
