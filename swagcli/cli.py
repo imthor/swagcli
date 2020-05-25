@@ -95,6 +95,7 @@ class Swagcli:
         baseurl = f"{schemes[0]}://{host}{basepath}"
 
         for path, conf in config.items():
+            url = f"{baseurl}{path}"
             methods = conf.keys()
 
             if self.prehooks:
@@ -103,7 +104,6 @@ class Swagcli:
                     # user defined function to pre_process the path
                     path = path_prehook(path)
 
-            url = f"{baseurl}{path}"
             for method in methods:
                 newpath = f"{path}/{method}"
                 if not self._should_process_path(newpath):
@@ -283,26 +283,30 @@ class Swagcli:
         func.__name__ = name
         node.cmdfunc = func
 
-    @staticmethod
-    def _handle_api_response(response, response_map):
+    def _handle_api_response(self, response, response_map):
         """
         Basic handler that prints response from the api call or the error
         """
-        response_map["200"] = {
-            "description": response.json()
-        } or response_map.get("200")
         response_map["403"] = response_map.get(
             "403", {"description": "Access unauthorized"}
         )
         response_map["404"] = response_map.get(
             "404", {"description": "Resource not found"}
         )
+        response_map["500"] = response_map.get(
+            "500", {"description": "An Internal Server error occurred"}
+        )
 
         output_response = response_map.get(str(response.status_code), {}).get(
             "description"
         )
-        if not output_response:
+        if not output_response or response.status_code == 200:
             output_response = response.json()
+            if self.prehooks:
+                response_prehook = self.prehooks.get("response")
+                if response_prehook:
+                    # user defined function to pre_process the path
+                    output_response = response_prehook(response.json())
         click.echo(output_response)
 
     def _handle_command_run(self, node, request_args):
@@ -318,7 +322,7 @@ class Swagcli:
             response = self.make_request(
                 node.request_method, request_url, **request_options
             )
-            Swagcli._handle_api_response(response, node.responses)
+            self._handle_api_response(response, node.responses)
         except requests.exceptions.ReadTimeout as err:
             click.echo(f"Request TIMED OUT: {err}")
         except requests.exceptions.HTTPError as err:
