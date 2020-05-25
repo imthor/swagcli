@@ -98,11 +98,7 @@ class Swagcli:
             url = f"{baseurl}{path}"
             methods = conf.keys()
 
-            if self.prehooks:
-                path_prehook = self.prehooks.get("path")
-                if path_prehook:
-                    # user defined function to pre_process the path
-                    path = path_prehook(path)
+            path = self._handle_prehook("path", path)
 
             for method in methods:
                 newpath = f"{path}/{method}"
@@ -283,6 +279,14 @@ class Swagcli:
         func.__name__ = name
         node.cmdfunc = func
 
+    def _handle_prehook(self, hook_name, value):
+        if self.prehooks:
+            prehook = self.prehooks.get(hook_name)
+            if prehook:
+                # user defined function to pre_process hook_name
+                return prehook(value)
+        return value
+
     def _handle_api_response(self, response, response_map):
         """
         Basic handler that prints response from the api call or the error
@@ -301,19 +305,15 @@ class Swagcli:
             "description"
         )
         if not output_response or response.status_code == 200:
-            output_response = response.json()
-            if self.prehooks:
-                response_prehook = self.prehooks.get("response")
-                if response_prehook:
-                    # user defined function to pre_process the path
-                    output_response = response_prehook(response.json())
+            output_response = self._handle_prehook("response", response.json())
         click.echo(output_response)
 
     def _handle_command_run(self, node, request_args):
 
         # replaces the in-url arguments with its value
         request_url = Swagcli._process_url_args(request_args, node.request_url)
-        # if payload.get('')
+        request_url = self._handle_prehook("url", request_url)
+
         request_options = {
             "params": request_args.get("query"),
             "data": request_args.get("formData") or request_args.get("body"),
