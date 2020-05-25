@@ -4,7 +4,7 @@ This is where all the magic happens
 
 import re
 import click
-from requests import Request, Session
+import requests
 from .commandstore import CommandStore
 
 
@@ -25,9 +25,12 @@ class Swagcli:
     def _get_config(self):
         if self.config:
             return self.config
-        response = self.make_request("GET", self.config_url)
-        self.config = response.json()
-        return self.config
+        try:
+            response = self.make_request("GET", self.config_url)
+            self.config = response.json()
+            return self.config
+        except requests.exceptions.ConnectionError as err:
+            raise ValueError(f"Invalid URL. Error details: {err}")
 
     def make_request(self, method, url, **kwargs):
         """
@@ -42,8 +45,8 @@ class Swagcli:
         if auth:
             kwargs["auth"] = auth
 
-        req = Request(method, url, **kwargs)
-        session = Session()
+        req = requests.Request(method, url, **kwargs)
+        session = requests.Session()
         response = session.send(session.prepare_request(req))
         return response
 
