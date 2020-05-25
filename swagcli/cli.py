@@ -83,7 +83,9 @@ class Swagcli:
             else:
                 for method in methods:
                     newpath = f"{path}/{method}"
-                    self.command_store.add_path(newpath, url, method, conf[method])
+                    self.command_store.add_path(
+                        newpath, url, method, conf[method]
+                    )
 
     def print_paths(self):
         """
@@ -177,7 +179,9 @@ class Swagcli:
         if tmp_options.get("type") == "array":
             # for type arrays look into the datatype of items
             option_kwargs["multiple"] = True
-            tmp_options = _prepare_args(tmp_options, option_map, param.get("items"))
+            tmp_options = _prepare_args(
+                tmp_options, option_map, param.get("items")
+            )
 
         return _update_args(option_kwargs, tmp_options)
 
@@ -208,7 +212,9 @@ class Swagcli:
         # parent, we don't create click-commands in literal sense as such,
         # but use click groups and set it to be invoked without a command
         # wherever its supposed to be command
-        @node.parent.cmdfunc.group(name=name, invoke_without_command=node.is_command)
+        @node.parent.cmdfunc.group(
+            name=name, invoke_without_command=node.is_command
+        )
         def func(*_, **kwargs):
             # if it isn't a command, its most likely a placeholder command
             # group, in this case we need no do anything
