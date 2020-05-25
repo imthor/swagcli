@@ -138,6 +138,16 @@ class Swagcli:
         return payload
 
     @staticmethod
+    def _update_payload_value(payload, value_map):
+        """
+        Iterates over payload and assigns value from value_map if found
+        """
+        for p_type, arg_list in payload.items():
+            for arg_name in arg_list.keys():
+                payload[p_type][arg_name] = value_map.get(arg_name, None)
+        return payload
+
+    @staticmethod
     def _get_param_options(param):
         param_validator = {"name": ""}
         data_type_map = {"integer": int, "string": str}
@@ -226,6 +236,7 @@ class Swagcli:
                 request_url = Swagcli._process_url_args(
                     payload, node.request_url, kwargs
                 )
+                request_args = Swagcli._update_payload_value(payload, kwargs)
 
                 print(
                     "I will make",
@@ -233,7 +244,7 @@ class Swagcli:
                     "request to",
                     request_url,
                     "with --",
-                    kwargs,
+                    request_args,
                 )
 
         # time to populate node specific params
@@ -252,6 +263,10 @@ class Swagcli:
 
         func.__name__ = name
         node.cmdfunc = func
+
+    @staticmethod
+    def _handle_command_run(node, payload):
+        pass
 
     def _start(self):
         for node in self.command_store.iterate():
