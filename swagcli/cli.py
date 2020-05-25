@@ -1,146 +1,54 @@
-import click
-import json
+"""
+This is where all the magic happens
+"""
+
 import re
+import click
 from requests import Request, Session
+from .commandstore import CommandStore
 
-from anytree import NodeMixin, RenderTree, PreOrderIter
 
-
-class NodeBase():
-    pass
-
-class Node(NodeBase, NodeMixin):
+class Swagcli:
     """
-    Node corresponding to each path in the config
+    Class with the actual logic to create equivalent click commands based on
+    the swagger config
     """
-    def __init__(self, name, fullpath, is_command=False, config=None, parent=None, children=None):
-        super(Node, self).__init__()
-        self.name = name
-        self.fullpath = fullpath
-        self.is_command = is_command
-        self.config = config
-        self.parent = parent
-        self.cmdfunc = None
-        self.request_method = None
-        self.request_url = None
-        self.arguments = []
-        self.parameters = []
-        if children:
-            self.children = children
 
-
-class CommandStore():
-    """
-    Stores the paths as a Tree
-    """
-    def __init__(self):
-        self.root = Node('/', '/')
-
-    def _get_path_list(self, path):
-        """
-        Returns a list, with all names in the path
-        """
-        return path.split('/')[1:]
-
-    def _get_node_by_path(self, fullpath, **kwargs):
-        for node in PreOrderIter(self.root, **kwargs):
-            if node.fullpath == fullpath:
-                return node
-
-    def is_root(self, node):
-        if self.root.fullpath == node.fullpath:
-            return True
-        return False
-
-    def add_path(self, path, request_url, request_method, path_config):
-        """
-        Function to correctly add a new path to the command store
-        """
-
-        def pre_process_fullpath(fullpath):
-            """
-            Strip of the in-path variable name from the fullpath
-            """
-            return re.sub("/{.*}", '', fullpath)
-
-        path_list = self._get_path_list(path)
-        if not path_list:
-            return False
-
-        # We set root as the parent, iterate over all the keywords in the path
-        # and we create a corresponding Tree
-        parent = self.root
-        # create only till the second last item
-        for index in range(0, len(path_list)-1):
-            path_item = path_list[index]
-            if re.search("{(.*)}", path_item):
-                # If the path_item is of the form {.*}, then it is an argument
-                # Do not create a node for this
-                continue
-            current_path = self.root.name + "/".join(path_list[:index+1])
-            # Remove argument strings from our path
-            current_path = pre_process_fullpath(current_path)
-
-            # Check if another node with same path exist
-            node = self._get_node_by_path(current_path)
-            if node:
-                # We need not create a node and st this guy as the parent
-                parent = node
-                continue
-
-            parent = Node(path_item, current_path, parent=parent)
-
-        path_name = path_list[-1]
-        node = self._get_node_by_path(pre_process_fullpath(path))
-        if node:
-            node.config = path_config
-        else:
-            node = Node(path_name, pre_process_fullpath(path), is_command=True, config=path_config, parent=parent)
-
-        node.arguments = [re.sub('{|}', '', path_name) for path_name in path_list if re.search("{(.*)}", path_name)]
-        node.parameters = path_config.get('parameters', [])
-        node.request_method = request_method
-        node.request_url = request_url
-
-    def iterate(self, **kwargs):
-        for node in PreOrderIter(self.root, **kwargs):
-            yield node
-
-    def print(self):
-        for pre, fill, node in RenderTree(self.root):
-            treestr = u"%s%s" % (pre, node.name)
-            print(treestr.ljust(8), " -- ", node.fullpath, node.arguments, node.is_command, node.request_method, node.request_url)
-
-class Swagcli():
-
-    def __init__(self, url):
+    def __init__(self, url, auth=None):
+        self.auth = auth
         self.default_headers = {}
         self.default_data = {}
         self.config_url = url
         self.config = {}
         self.command_store = CommandStore()
-        pass
 
     def _get_config(self):
         if self.config:
             return self.config
-        response = self.make_request('GET', self.config_url)
+        response = self.make_request("GET", self.config_url)
         self.config = response.json()
         return self.config
 
-    def make_request(self, method, url, data={}, headers={}):
+    def make_request(self, method, url, **kwargs):
+        """
+        Generic function to make web requests
+        """
 
-        # clean inputs
-        data = data or self.default_data
-        headers = headers or self.default_headers
         method = method.upper()
+        kwargs["data"] = kwargs.get("data", self.default_data)
+        kwargs["headers"] = kwargs.get("headers", self.default_headers)
 
-        req = Request(method, url, data=data, headers=headers)
+        auth = kwargs.get("auth", self.auth)
+        if auth:
+            kwargs["auth"] = auth
+
+        req = Request(method, url, **kwargs)
         session = Session()
         response = session.send(session.prepare_request(req))
         return response
 
-    def _verify_config(self, config, validator):
+    @staticmethod
+    def _verify_config(config, validator):
         """
         Checks if the required keys are all provided or not
         """
@@ -148,25 +56,21 @@ class Swagcli():
             if required_key not in config.keys():
                 raise ValueError(f'Required key "{required_key}" not found.')
             if required_child:
-                self._verify_config(config[required_key], required_child)
+                Swagcli._verify_config(config[required_key], required_child)
 
     def _parse_paths(self):
         """
         Iterates over all the paths and updates its internal command store DS
         """
-        validator = {
-            'paths': '',
-            'host': '',
-            'basePath': '',
-        }
-        self._verify_config(self._get_config(), validator)
+        validator = {"paths": "", "host": "", "basePath": ""}
+        Swagcli._verify_config(self._get_config(), validator)
 
-        config = self._get_config()['paths']
-        host = self._get_config()['host']
-        basepath = self._get_config()['basePath']
+        config = self._get_config()["paths"]
+        host = self._get_config()["host"]
+        basepath = self._get_config()["basePath"]
 
         # uses 'https' as default
-        schemes = self._get_config().get('schemes', ['https'])
+        schemes = self._get_config().get("schemes", ["https"])
 
         baseurl = f"{schemes[0]}://{host}{basepath}"
 
@@ -182,124 +86,178 @@ class Swagcli():
                     self.command_store.add_path(newpath, url, method, conf[method])
 
     def print_paths(self):
+        """
+        Calls and prints the state of commands as a tree
+        """
         self.command_store.print()
 
-    def iterate_commands(self, **kwargs):
-        for node in self.command_store.iterate(**kwargs):
-            print(node.request_url)
+    @staticmethod
+    def _process_url_args(payload, request_url, passed_values):
+        # pylint: disable=fixme
+        # TODO: support the serialization
+        # https://swagger.io/docs/specification/serialization/
+        for key in payload.get("path", {}):
+            regex = "{" + key.lower() + "}"
+            request_url = re.sub(
+                regex,
+                str(passed_values.get(key.lower())),
+                request_url,
+                flags=re.IGNORECASE,
+            )
+        return request_url
 
-    def _handle_path(self, path_name, path_config):
+    @staticmethod
+    def _process_header_args():
         pass
 
-    def _start(self):
-        import click
+    @staticmethod
+    def _process_form_data_args():
+        pass
 
-        @click.group(context_settings=dict(help_option_names=['-h', '--help']))
+    @staticmethod
+    def _process_body_args():
+        pass
+
+    @staticmethod
+    def _update_payload(payload, param):
+        """
+        the following config identified where the parameter value should be
+        populated based on the value of 'in' parameter config
+
+        Puts a parameter in payload dict consisting of the following keys
+        [query, body, header, path ..]
+        """
+        data_in = param.get("in")
+        if not payload.get(data_in, False):
+            payload[data_in] = {}
+
+        # passing a dummy value, this value has to be populated at runtime
+        payload[data_in][param["name"]] = None
+        return payload
+
+    @staticmethod
+    def _get_param_options(param):
+        param_validator = {"name": ""}
+        data_type_map = {"integer": int, "string": str}
+
+        Swagcli._verify_config(param, param_validator)
+
+        # Populate the click options for the command based on config
+        option_kwargs = {"required": param.get("required", False)}
+
+        option_map = {
+            "type": "type",
+            "enum": "enum",
+            "help": "description",
+            "default": "default",
+        }
+
+        def _prepare_args(tmp_options, option_map, local_param):
+            for arg_name, param_name in option_map.items():
+                value = local_param.get(param_name)
+                if value:
+                    tmp_options[arg_name] = value
+            return tmp_options
+
+        def _update_args(option_kwargs, tmp_options):
+            """
+            Updates the arguments to the option_kwargs
+            """
+            for arg_name, value in tmp_options.items():
+                if arg_name == "enum":
+                    continue
+                if arg_name == "type":
+                    value = data_type_map.get(tmp_options["type"], str)
+                    if "enum" in tmp_options.keys():
+                        value = click.Choice(tmp_options["enum"])
+                option_kwargs[arg_name] = value
+            return option_kwargs
+
+        tmp_options = _prepare_args({}, option_map, param)
+        if tmp_options.get("type") == "array":
+            # for type arrays look into the datatype of items
+            option_kwargs["multiple"] = True
+            tmp_options = _prepare_args(tmp_options, option_map, param.get("items"))
+
+        return _update_args(option_kwargs, tmp_options)
+
+    @staticmethod
+    def _create_root_function(node):
+        @click.group(context_settings=dict(help_option_names=["-h", "--help"]))
         def main():
             pass
 
-        param_validator = {
-            'name': ''
-        }
+        # we are dealing with the root node, set the predefined main
+        # function as the command function
+        node.cmdfunc = main
 
-        data_type_map = {
-            'integer': int,
-            'string': str,
-        }
+    @staticmethod
+    def _create_function(node):
+        """
+        We dynamically create the click command function here with the
+        required parameters as fetched from the config and this will make
+        a web request with the required parameters as specified by the
+        config
+        """
+        # set name of the function to the name of the node
+        name = node.name
 
-        def create_function(node):
-            if self.command_store.is_root(node):
-                node.cmdfunc = main
-                return
+        payload = {}
 
-            name = node.fullpath.replace('/', '_')[1:]
-            payload = {}
-            #@click.argument("test")
-            def func(*args, **kwargs):
+        # this will create another click group and associate it with its
+        # parent, we don't create click-commands in literal sense as such,
+        # but use click groups and set it to be invoked without a command
+        # wherever its supposed to be command
+        @node.parent.cmdfunc.group(name=name, invoke_without_command=node.is_command)
+        def func(*_, **kwargs):
+            # if it isn't a command, its most likely a placeholder command
+            # group, in this case we need no do anything
+            if node.is_command:
 
-                def process_url_args(request_url, passed_values):
-                    for key in payload.get('path', {}):
-                        regex = '{' + key.lower() + '}'
-                        request_url = re.sub(regex, str(passed_values.get(key.lower())), request_url, flags=re.IGNORECASE)
-                    return request_url
+                # replaces the in-url arguments we have with the ones that
+                # have been provided as click options
 
-                request_url = node.request_url
-                request_url = process_url_args(request_url, kwargs)
+                request_url = Swagcli._process_url_args(
+                    payload, node.request_url, kwargs
+                )
 
-                print(node.parent.name)
-                print("I will make", node.request_method, 'request to', request_url, "with --", kwargs)
-                #print("I am the '{}' command {}".format(name, kwargs))
-                #print(node.arguments, node.parameters)
+                print(
+                    "I will make",
+                    node.request_method,
+                    "request to",
+                    request_url,
+                    "with --",
+                    kwargs,
+                )
 
-            func.__name__ = name
+        # time to populate node specific params
+        for param in node.parameters:
 
-            # time to populate node specific params
-            for param in node.parameters:
-                self._verify_config(param, param_validator)
+            option_kwargs = Swagcli._get_param_options(param)
 
-                # Populate the click options for the command based on the
-                # config we have
-                option_kwargs = {
-                    'required': param.get('required', False),
-                }
+            # Associate all the above options with our command function
+            func = click.option(f"--{param['name']}", **option_kwargs)(func)
 
-                option_type = param.get('type')
-                option_enum = param.get('enum')
-                option_help = param.get('description')
-                option_default = param.get('default')
+            payload = Swagcli._update_payload(payload, param)
 
-                # for arrays look into the datatype of items
-                if option_type == 'array':
-                    option_type = param.get('items').get('type')
-                    option_enum = param.get('items').get('enum')
-                    option_help = param.get('items').get('description')
-                    option_default = param.get('items').get('default')
-                    option_kwargs['multiple'] = True
+        if node.config:
+            # add the summary as docstring of the function
+            func.__doc__ = node.config.get("summary", "")
 
-                option_kwargs['type'] = data_type_map.get(option_type, str)
-                if option_enum:
-                    option_kwargs['type'] = click.Choice(option_enum)
+        func.__name__ = name
+        node.cmdfunc = func
 
-                if option_help:
-                    option_kwargs['help'] = option_help
-
-                if option_default:
-                    option_kwargs['default'] = option_default
-
-                # Associate all the above options with our command function
-                func = click.option(
-                    f"--{param['name']}",
-                    **option_kwargs
-                )(func)
-
-                # the following config states where the parameter value should
-                # go to - [query, body, header, path ..]
-                data_in = param.get('in')
-                if not payload.get(data_in, False):
-                    payload[data_in] = {}
-                # passing a dummy value, this value has to be populated at runtime
-                payload[data_in][param['name']] = ''
-
-            if node.config:
-                # add the summary as docstring of the function
-                func.__doc__ = node.config.get('summary', '')
-
-
-            node.cmdfunc = func
-            #node.parent.cmdfunc.
-            main.command(name=name)(func)
-
+    def _start(self):
         for node in self.command_store.iterate():
-            create_function(node)
-
-        main()
+            if self.command_store.is_root(node):
+                Swagcli._create_root_function(node)
+            else:
+                Swagcli._create_function(node)
+        self.command_store.root.cmdfunc()  # pylint: disable=not-callable
 
     def run(self):
+        """
+        Start of the program, invokes the click commands
+        """
         self._parse_paths()
         self._start()
-
-
-s = Swagcli("https://petstore.swagger.io/v2/swagger.json")
-#s.print_paths()
-#s.iterate_commands()
-s.run()
