@@ -9,7 +9,17 @@ def main():
     """
     Pet Store runner
     """
-    swag = Swagcli("https://petstore.swagger.io/v2/swagger.json")
+    def path_prehook(path):
+        return path.replace('/pet/', '/')
+    option = {
+        #'exclude_path_regex': ['store'],
+        #'include_path_regex': ['get'],
+        'prehooks': {
+            #'path': path_prehook
+        }
+    }
+
+    swag = Swagcli("https://petstore.swagger.io/v2/swagger.json", **option)
     swag.run()
 
 
