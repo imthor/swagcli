@@ -15,10 +15,10 @@ class Swagcli:
     """
 
     def __init__(self, url, **kwargs):
-        self.auth = kwargs.get('auth', None)
-        self.prehooks = kwargs.get('prehooks', None)
-        self.exclude_path_regex = kwargs.get('exclude_path_regex', None)
-        self.include_path_regex = kwargs.get('include_path_regex', None)
+        self.auth = kwargs.get("auth", None)
+        self.prehooks = kwargs.get("prehooks", None)
+        self.exclude_path_regex = kwargs.get("exclude_path_regex", None)
+        self.include_path_regex = kwargs.get("include_path_regex", None)
         self.default_headers = {}
         self.default_data = {}
         self.config_url = url
@@ -98,7 +98,7 @@ class Swagcli:
             methods = conf.keys()
 
             if self.prehooks:
-                path_prehook = self.prehooks.get('path')
+                path_prehook = self.prehooks.get("path")
                 if path_prehook:
                     # user defined function to pre_process the path
                     path = path_prehook(path)
@@ -110,9 +110,7 @@ class Swagcli:
                     continue
                 if len(methods) == 1:
                     newpath = path
-                self.command_store.add_path(
-                    newpath, url, method, conf[method]
-                )
+                self.command_store.add_path(newpath, url, method, conf[method])
 
     def print_paths(self):
         """
@@ -121,17 +119,14 @@ class Swagcli:
         self.command_store.print()
 
     @staticmethod
-    def _process_url_args(payload, request_url, passed_values):
+    def _process_url_args(payload, request_url):
         # pylint: disable=fixme
         # TODO: support the serialization
         # https://swagger.io/docs/specification/serialization/
-        for key in payload.get("path", {}):
+        for key, value in payload.get("path", {}).items():
             regex = "{" + key.lower() + "}"
             request_url = re.sub(
-                regex,
-                str(passed_values.get(key.lower())),
-                request_url,
-                flags=re.IGNORECASE,
+                regex, str(value), request_url, flags=re.IGNORECASE
             )
         return request_url
 
@@ -171,7 +166,12 @@ class Swagcli:
         """
         for p_type, arg_list in payload.items():
             for arg_name in arg_list.keys():
-                payload[p_type][arg_name] = value_map.get(arg_name, None)
+                arg_value = value_map.get(arg_name, None)
+                if not arg_value:
+                    # click has been known to return args in small case in
+                    # kwargs
+                    arg_value = value_map.get(arg_name.lower(), None)
+                payload[p_type][arg_name] = arg_value
         return payload
 
     @staticmethod
@@ -227,7 +227,7 @@ class Swagcli:
         """
         PreProcess the option name to be compatible with click option names
         """
-        return name.replace('.', "")
+        return name.replace(".", "")
 
     @staticmethod
     def _create_root_function(node):
@@ -239,8 +239,7 @@ class Swagcli:
         # function as the command function
         node.cmdfunc = main
 
-    @staticmethod
-    def _create_function(node):
+    def _create_function(self, node):
         """
         We dynamically create the click command function here with the
         required parameters as fetched from the config and this will make
@@ -263,29 +262,14 @@ class Swagcli:
             # if it isn't a command, its most likely a placeholder command
             # group, in this case we need no do anything
             if node.is_command:
-
-                # replaces the in-url arguments we have with the ones that
-                # have been provided as click options
-
-                request_url = Swagcli._process_url_args(
-                    payload, node.request_url, kwargs
-                )
                 request_args = Swagcli._update_payload_value(payload, kwargs)
-
-                print(
-                    "I will make",
-                    node.request_method,
-                    "request to",
-                    request_url,
-                    "with --",
-                    request_args,
-                )
+                self._handle_command_run(node, request_args)
 
         # time to populate node specific params
         for param in node.parameters:
 
             option_kwargs = Swagcli._get_param_options(param)
-            option_name = Swagcli._preprocess_option_name(param['name'])
+            option_name = Swagcli._preprocess_option_name(param["name"])
 
             # Associate all the above options with our command function
             func = click.option(f"--{option_name}", **option_kwargs)(func)
@@ -300,15 +284,55 @@ class Swagcli:
         node.cmdfunc = func
 
     @staticmethod
-    def _handle_command_run(node, payload):
-        pass
+    def _handle_api_response(response, response_map):
+        """
+        Basic handler that prints response from the api call or the error
+        """
+        response_map["200"] = {
+            "description": response.json()
+        } or response_map.get("200")
+        response_map["403"] = response_map.get(
+            "403", {"description": "Access unauthorized"}
+        )
+        response_map["404"] = response_map.get(
+            "404", {"description": "Resource not found"}
+        )
+
+        output_response = response_map.get(str(response.status_code), {}).get(
+            "description"
+        )
+        if not output_response:
+            output_response = response.json()
+        click.echo(output_response)
+
+    def _handle_command_run(self, node, request_args):
+
+        # replaces the in-url arguments with its value
+        request_url = Swagcli._process_url_args(request_args, node.request_url)
+        # if payload.get('')
+        request_options = {
+            "params": request_args.get("query"),
+            "data": request_args.get("formData") or request_args.get("body"),
+        }
+        try:
+            response = self.make_request(
+                node.request_method, request_url, **request_options
+            )
+            Swagcli._handle_api_response(response, node.responses)
+        except requests.exceptions.ReadTimeout as err:
+            click.echo(f"Request TIMED OUT: {err}")
+        except requests.exceptions.HTTPError as err:
+            click.echo(f"Unable to process your request: {err}")
+        except requests.exceptions.ConnectionError as err:
+            click.echo(f"Unable to connect to the server: {err}")
+        return {"success": False}
 
     def _start(self):
         for node in self.command_store.iterate():
             if self.command_store.is_root(node):
                 Swagcli._create_root_function(node)
             else:
-                Swagcli._create_function(node)
+                self._create_function(node)
         self.command_store.root.cmdfunc()  # pylint: disable=not-callable
 
     def run(self):

@@ -35,6 +35,7 @@ class Node(NodeBase, NodeMixin):
         self.cmdfunc = None
         self.request_method = None
         self.request_url = None
+        self.responses = None
         self.arguments = []
         self.parameters = []
         if kwargs.get("children"):
@@ -129,6 +130,7 @@ class CommandStore:
         node.parameters = path_config.get("parameters", [])
         node.request_method = request_method
         node.request_url = request_url
+        node.responses = path_config.get("responses", {})
 
     def iterate(self, **kwargs):
         """
@@ -147,7 +149,6 @@ class CommandStore:
                 treestr.ljust(8),
                 " -- ",
                 node.fullpath,
-                node.arguments,
                 node.is_command,
                 node.request_method,
                 node.request_url,
