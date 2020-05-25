@@ -1,5 +1,0 @@
-#! /bin/env python
-
-import swagcli.cli
-
-print("done")
