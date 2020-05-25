@@ -65,12 +65,12 @@ class Swagcli:
         """
         Iterates over all the paths and updates its internal command store DS
         """
-        validator = {"paths": "", "host": "", "basePath": ""}
+        validator = {"paths": "", "host": ""}
         Swagcli._verify_config(self._get_config(), validator)
 
         config = self._get_config()["paths"]
         host = self._get_config()["host"]
-        basepath = self._get_config()["basePath"]
+        basepath = self._get_config().get("basePath", "")
 
         # uses 'https' as default
         schemes = self._get_config().get("schemes", ["https"])
@@ -199,6 +199,13 @@ class Swagcli:
         return _update_args(option_kwargs, tmp_options)
 
     @staticmethod
+    def _preprocess_option_name(name):
+        """
+        PreProcess the option name to be compatible with click option names
+        """
+        return name.replace('.', "")
+
+    @staticmethod
     def _create_root_function(node):
         @click.group(context_settings=dict(help_option_names=["-h", "--help"]))
         def main():
@@ -254,9 +261,10 @@ class Swagcli:
         for param in node.parameters:
 
             option_kwargs = Swagcli._get_param_options(param)
+            option_name = Swagcli._preprocess_option_name(param['name'])
 
             # Associate all the above options with our command function
-            func = click.option(f"--{param['name']}", **option_kwargs)(func)
+            func = click.option(f"--{option_name}", **option_kwargs)(func)
 
             payload = Swagcli._update_payload(payload, param)
 
