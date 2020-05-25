@@ -2,6 +2,7 @@
 Sample cli for swagger petstore
 """
 
+import json
 from swagcli import Swagcli
 
 
@@ -17,7 +18,8 @@ def main():
         "exclude_path_regex": ["/user/post"],
         #'include_path_regex': ['get'],
         "prehooks": {
-            #'path': path_prehook
+            # "path": path_prehook,
+            "response": json.dumps
         },
     }
 
