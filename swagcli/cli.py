@@ -14,8 +14,11 @@ class Swagcli:
     the swagger config
     """
 
-    def __init__(self, url, auth=None):
-        self.auth = auth
+    def __init__(self, url, **kwargs):
+        self.auth = kwargs.get('auth', None)
+        self.prehooks = kwargs.get('prehooks', None)
+        self.exclude_path_regex = kwargs.get('exclude_path_regex', None)
+        self.include_path_regex = kwargs.get('include_path_regex', None)
         self.default_headers = {}
         self.default_data = {}
         self.config_url = url
@@ -61,6 +64,20 @@ class Swagcli:
             if required_child:
                 Swagcli._verify_config(config[required_key], required_child)
 
+    def _should_process_path(self, path):
+        """
+        A function to decide if a specific path needs to be processed or not
+        """
+        if self.include_path_regex:
+            if re.search("".join(self.include_path_regex), path) is None:
+                # if it doesn't match ignore
+                return False
+        if self.exclude_path_regex:
+            if re.search("".join(self.exclude_path_regex), path):
+                # if there is a match ignore
+                return False
+        return True
+
     def _parse_paths(self):
         """
         Iterates over all the paths and updates its internal command store DS
@@ -79,16 +96,23 @@ class Swagcli:
 
         for path, conf in config.items():
             methods = conf.keys()
+
+            if self.prehooks:
+                path_prehook = self.prehooks.get('path')
+                if path_prehook:
+                    # user defined function to pre_process the path
+                    path = path_prehook(path)
+
             url = f"{baseurl}{path}"
-            if len(methods) == 1:
-                method = list(methods)[-1]
-                self.command_store.add_path(path, url, method, conf[method])
-            else:
-                for method in methods:
-                    newpath = f"{path}/{method}"
-                    self.command_store.add_path(
-                        newpath, url, method, conf[method]
-                    )
+            for method in methods:
+                newpath = f"{path}/{method}"
+                if not self._should_process_path(newpath):
+                    continue
+                if len(methods) == 1:
+                    newpath = path
+                self.command_store.add_path(
+                    newpath, url, method, conf[method]
+                )
 
     def print_paths(self):
         """
