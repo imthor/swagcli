@@ -107,6 +107,41 @@ SwagCli provides significant advantages in these scenarios:
 pip install swagcli
 ```
 
+## Publishing to PyPI
+
+To publish a new version of SwagCli to PyPI, follow these steps:
+
+1. **Install required tools**:
+   ```bash
+   pip install build twine
+   ```
+
+2. **Build the package**:
+   ```bash
+   python -m build
+   ```
+   This will create distribution files in the `dist` directory.
+
+3. **Get a PyPI API token**:
+   - Go to https://pypi.org and log in
+   - Navigate to Account Settings → API tokens
+   - Create a new token with appropriate scope
+   - Copy the token (it starts with `pypi-`)
+
+4. **Upload to PyPI**:
+   ```bash
+   python -m twine upload dist/*
+   ```
+   When prompted:
+   - Username: `__token__`
+   - Password: Your PyPI API token
+
+5. **Verify the upload**:
+   - Visit https://pypi.org/project/swagcli/
+   - Check that your new version is listed
+
+For subsequent releases, update the version number in `pyproject.toml` and repeat steps 2-4.
+
 ## Quick Start
 
 ```python
