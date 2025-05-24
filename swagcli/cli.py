@@ -121,9 +121,7 @@ class Swagcli:
         # https://swagger.io/docs/specification/serialization/
         for key, value in payload.get("path", {}).items():
             regex = "{" + key.lower() + "}"
-            request_url = re.sub(
-                regex, str(value), request_url, flags=re.IGNORECASE
-            )
+            request_url = re.sub(regex, str(value), request_url, flags=re.IGNORECASE)
         return request_url
 
     @staticmethod
@@ -212,9 +210,12 @@ class Swagcli:
         if tmp_options.get("type") == "array":
             # for type arrays look into the datatype of items
             option_kwargs["multiple"] = True
-            tmp_options = _prepare_args(
-                tmp_options, option_map, param.get("items")
-            )
+            tmp_options = _prepare_args(tmp_options, option_map, param.get("items"))
+            # Fix: ensure default is a list if multiple is True
+            if "default" in tmp_options and not isinstance(
+                tmp_options["default"], list
+            ):
+                tmp_options["default"] = [tmp_options["default"]]
 
         return _update_args(option_kwargs, tmp_options)
 
@@ -251,9 +252,7 @@ class Swagcli:
         # parent, we don't create click-commands in literal sense as such,
         # but use click groups and set it to be invoked without a command
         # wherever its supposed to be command
-        @node.parent.cmdfunc.group(
-            name=name, invoke_without_command=node.is_command
-        )
+        @node.parent.cmdfunc.group(name=name, invoke_without_command=node.is_command)
         def func(*_, **kwargs):
             # if it isn't a command, its most likely a placeholder command
             # group, in this case we need no do anything
@@ -263,7 +262,6 @@ class Swagcli:
 
         # time to populate node specific params
         for param in node.parameters:
-
             option_kwargs = Swagcli._get_param_options(param)
             option_name = Swagcli._preprocess_option_name(param["name"])
 
@@ -309,7 +307,6 @@ class Swagcli:
         click.echo(output_response)
 
     def _handle_command_run(self, node, request_args):
-
         # replaces the in-url arguments with its value
         request_url = Swagcli._process_url_args(request_args, node.request_url)
         request_url = self._handle_prehook("url", request_url)

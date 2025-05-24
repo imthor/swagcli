@@ -144,7 +144,7 @@ class CommandStore:
         Prints the tree state in CommandStore in a pretty way
         """
         for pre, _, node in RenderTree(self.root):
-            treestr = u"%s%s" % (pre, node.name)
+            treestr = "%s%s" % (pre, node.name)
             print(
                 treestr.ljust(8),
                 " -- ",
