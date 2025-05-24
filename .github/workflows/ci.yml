@@ -28,7 +28,7 @@ jobs:
     
     - name: Run tests
       run: |
-        pytest --cov=swagcli --cov-report=xml
+        pytest -v
     
   lint:
     runs-on: ubuntu-latest
