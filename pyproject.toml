@@ -27,6 +27,7 @@ dependencies = [
     "python-multipart>=0.0.6",
     "pyjwt>=2.8.0",
     "jsonschema>=4.20.0",
+    "anytree>=2.8.0",
 ]
 
 [project.optional-dependencies]
