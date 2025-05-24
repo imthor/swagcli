@@ -3,9 +3,10 @@ Example of using SwagCli with Azure Storage
 Demonstrates Azure AD authentication and blob storage operations
 """
 
-import os
 import asyncio
-from swagcli import Swagcli, Config, AuthConfig
+import os
+
+from swagcli import AuthConfig, Config, Swagcli
 from swagcli.plugins.cache import plugin as cache
 from swagcli.plugins.request_logger import plugin as request_logger
 

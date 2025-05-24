@@ -1,7 +1,9 @@
 import os
-import pytest
 from pathlib import Path
-from swagcli.plugins.file_handler import plugin, on_request, on_response
+
+import pytest
+
+from swagcli.plugins.file_handler import on_request, on_response, plugin
 
 
 @pytest.fixture

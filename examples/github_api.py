@@ -4,7 +4,8 @@ Demonstrates OAuth2 authentication and rate limiting
 """
 
 import json
-from swagcli import Swagcli, Config, AuthConfig
+
+from swagcli import AuthConfig, Config, Swagcli
 from swagcli.plugins.rate_limiter import plugin as rate_limiter
 
 

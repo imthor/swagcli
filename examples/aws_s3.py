@@ -4,7 +4,8 @@ Demonstrates AWS Signature authentication and file operations
 """
 
 import os
-from swagcli import Swagcli, Config, AuthConfig
+
+from swagcli import AuthConfig, Config, Swagcli
 from swagcli.plugins.file_handler import plugin as file_handler
 from swagcli.plugins.metrics import plugin as metrics
 

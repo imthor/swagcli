@@ -1,39 +1,41 @@
 import asyncio
+import time
 from typing import Any, Dict, Optional, Union
+
 import aiohttp
 from rich.console import Console
 from rich.progress import Progress
-from .models import APIResponse
-from .config import Config
+
 from .cache import Cache
+from .config import Config
+from .models import APIResponse
 from .plugins import plugin_manager
-import time
 
 
 class APIClient:
     def __init__(
         self,
         config: Config,
-    ):
+    ) -> None:
         self.config = config
         self.base_url = config.base_url.rstrip("/")
         self.cache = Cache(config.cache)
         self.session: Optional[aiohttp.ClientSession] = None
         self.console = Console()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "APIClient":
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=self.config.timeout),
             raise_for_status=True,
         )
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         if self.session:
             await self.session.close()
 
     def _get_auth_headers(self) -> Dict[str, str]:
-        headers = {}
+        headers: Dict[str, str] = {}
         if not self.config.auth:
             return headers
 
@@ -58,7 +60,7 @@ class APIClient:
 
         return headers
 
-    def _headers_to_dict(self, headers) -> dict:
+    def _headers_to_dict(self, headers: Any) -> Dict[str, str]:
         # Handle real CIMultiDictProxy
         if hasattr(headers, "items") and not asyncio.iscoroutinefunction(headers.items):
             return dict(headers)
@@ -114,73 +116,144 @@ class APIClient:
 
         for attempt in range(self.config.max_retries):
             try:
-                with (
-                    Progress()
-                    if show_progress
-                    else self.console.status("Making request...")
-                ):
-                    if files:
-                        # Handle file upload
-                        form_data = aiohttp.FormData()
-                        for key, value in data.items():
-                            if key not in files:
-                                form_data.add_field(key, value)
+                if show_progress:
+                    with Progress():
+                        if files:
+                            # Handle file upload
+                            form_data = aiohttp.FormData()
+                            if data:
+                                for key, value in data.items():
+                                    if key not in files:
+                                        form_data.add_field(key, value)
 
-                        for key, (filename, content, content_type) in files.items():
-                            form_data.add_field(
-                                key,
-                                content,
-                                filename=filename,
-                                content_type=content_type,
-                            )
+                            for key, (filename, content, content_type) in files.items():
+                                form_data.add_field(
+                                    key,
+                                    content,
+                                    filename=filename,
+                                    content_type=content_type,
+                                )
 
-                        async with self.session.request(
-                            method,
-                            url,
-                            params=params,
-                            data=form_data,
-                            headers=request_headers,
-                            ssl=self.config.verify_ssl,
-                        ) as response:
-                            response_data = await response.json()
-                            elapsed = time.time() - start_time
+                            async with self.session.request(
+                                method,
+                                url,
+                                params=params,
+                                data=form_data,
+                                headers=request_headers,
+                                ssl=self.config.verify_ssl,
+                            ) as response:
+                                response_data = await response.json()
+                                elapsed = time.time() - start_time
 
-                            api_response = APIResponse(
-                                status_code=getattr(
-                                    response,
-                                    "status",
-                                    getattr(response, "status_code", 200),
-                                ),
-                                data=response_data,
-                                headers=self._headers_to_dict(response.headers),
-                                elapsed=elapsed,
-                            )
-                    else:
-                        # Regular request
-                        async with self.session.request(
-                            method,
-                            url,
-                            params=params,
-                            json=data,
-                            headers=request_headers,
-                            ssl=self.config.verify_ssl,
-                        ) as response:
-                            response_data = await response.json()
-                            elapsed = time.time() - start_time
+                                api_response = APIResponse(
+                                    status_code=getattr(
+                                        response,
+                                        "status",
+                                        getattr(response, "status_code", 200),
+                                    ),
+                                    data=response_data,
+                                    headers=self._headers_to_dict(response.headers),
+                                    elapsed=elapsed,
+                                )
+                        else:
+                            # Regular request
+                            async with self.session.request(
+                                method,
+                                url,
+                                params=params,
+                                json=data,
+                                headers=request_headers,
+                                ssl=self.config.verify_ssl,
+                            ) as response:
+                                response_data = await response.json()
+                                elapsed = time.time() - start_time
 
-                            api_response = APIResponse(
-                                status_code=getattr(
-                                    response,
-                                    "status",
-                                    getattr(response, "status_code", 200),
-                                ),
-                                data=response_data,
-                                headers=self._headers_to_dict(response.headers),
-                                elapsed=elapsed,
-                            )
-                            # Cache successful GET responses
-                            if method == "GET" and use_cache and response.status == 200:
-                                self.cache.set(method, url, api_response, params)
+                                api_response = APIResponse(
+                                    status_code=getattr(
+                                        response,
+                                        "status",
+                                        getattr(response, "status_code", 200),
+                                    ),
+                                    data=response_data,
+                                    headers=self._headers_to_dict(response.headers),
+                                    elapsed=elapsed,
+                                )
+                                # Cache successful GET responses
+                                if (
+                                    method == "GET"
+                                    and use_cache
+                                    and response.status == 200
+                                ):
+                                    self.cache.set(method, url, api_response, params)
+                else:
+                    with self.console.status("Making request..."):
+                        if files:
+                            # Handle file upload
+                            form_data = aiohttp.FormData()
+                            if data:
+                                for key, value in data.items():
+                                    if key not in files:
+                                        form_data.add_field(key, value)
+
+                            for key, (filename, content, content_type) in files.items():
+                                form_data.add_field(
+                                    key,
+                                    content,
+                                    filename=filename,
+                                    content_type=content_type,
+                                )
+
+                            async with self.session.request(
+                                method,
+                                url,
+                                params=params,
+                                data=form_data,
+                                headers=request_headers,
+                                ssl=self.config.verify_ssl,
+                            ) as response:
+                                response_data = await response.json()
+                                elapsed = time.time() - start_time
+
+                                api_response = APIResponse(
+                                    status_code=getattr(
+                                        response,
+                                        "status",
+                                        getattr(response, "status_code", 200),
+                                    ),
+                                    data=response_data,
+                                    headers=self._headers_to_dict(response.headers),
+                                    elapsed=elapsed,
+                                )
+                        else:
+                            # Regular request
+                            async with self.session.request(
+                                method,
+                                url,
+                                params=params,
+                                json=data,
+                                headers=request_headers,
+                                ssl=self.config.verify_ssl,
+                            ) as response:
+                                response_data = await response.json()
+                                elapsed = time.time() - start_time
+
+                                api_response = APIResponse(
+                                    status_code=getattr(
+                                        response,
+                                        "status",
+                                        getattr(response, "status_code", 200),
+                                    ),
+                                    data=response_data,
+                                    headers=self._headers_to_dict(response.headers),
+                                    elapsed=elapsed,
+                                )
+                                # Cache successful GET responses
+                                if (
+                                    method == "GET"
+                                    and use_cache
+                                    and response.status == 200
+                                ):
+                                    self.cache.set(method, url, api_response, params)
 
                     # Execute post-response hooks
                     plugin_manager.execute_plugin_hook(
@@ -192,6 +265,7 @@ class APIClient:
                 if attempt == self.config.max_retries - 1:
                     raise
                 await asyncio.sleep(2**attempt)  # Exponential backoff
+        raise RuntimeError("Failed to make request after all retries")
 
     async def get(
         self,

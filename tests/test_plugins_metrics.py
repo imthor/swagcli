@@ -1,8 +1,10 @@
 import json
-import pytest
 from pathlib import Path
-from swagcli.plugins.metrics import plugin, MetricsCollector, on_response
 from unittest.mock import patch
+
+import pytest
+
+from swagcli.plugins.metrics import MetricsCollector, on_response, plugin
 
 
 @pytest.fixture

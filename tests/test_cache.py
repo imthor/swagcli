@@ -1,6 +1,8 @@
 import time
 from pathlib import Path
+
 import pytest
+
 from swagcli.cache import Cache
 from swagcli.config import CacheConfig
 from swagcli.models import APIResponse

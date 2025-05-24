@@ -1,8 +1,11 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional, List, Callable
-from jsonschema import validate, ValidationError
-from ..plugins import Plugin
+from typing import Any, Callable, Dict, List, Optional
+
+from jsonschema import ValidationError, validate
+from pydantic import PrivateAttr
+
+from .base import Plugin
 
 plugin = Plugin(
     name="validator",
@@ -26,127 +29,78 @@ class CustomValidator:
             raise ValueError(f"Field '{self.field}': {self.error_message}")
 
 
-class SchemaValidator:
-    def __init__(self, schema_dir: Optional[Path] = None):
-        self.schema_dir = schema_dir or Path.home() / ".swagcli" / "schemas"
-        self.schema_dir.mkdir(parents=True, exist_ok=True)
-        self.schemas: Dict[str, Dict] = {}
-        self.custom_validators: Dict[str, CustomValidator] = {}
+class SchemaValidator(Plugin):
+    _schema_dir: Path = PrivateAttr()
+    _schemas: Dict[str, Dict[str, Any]] = PrivateAttr(default_factory=dict)
+    _custom_validators: Dict[str, Any] = PrivateAttr(default_factory=dict)
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="validator",
+            description="Validates requests and responses using JSON Schema",
+            version="1.0.0",
+            author="SwagCli Team",
+        )
+        self._schema_dir = Path.home() / ".swagcli" / "schemas"
+        self._schema_dir.mkdir(parents=True, exist_ok=True)
+        self._schemas = {}
+        self._custom_validators = {}
 
     def register_custom_validator(
         self, field: str, validator_func: Callable[[Any], bool], error_message: str
     ) -> None:
         """Register a custom validator function for a specific field."""
-        self.custom_validators[field] = CustomValidator(
+        self._custom_validators[field] = CustomValidator(
             field, validator_func, error_message
         )
 
-    def load_schema(self, endpoint: str) -> Optional[Dict]:
-        """Load a schema for an endpoint."""
-        if endpoint in self.schemas:
-            return self.schemas[endpoint]
+    def register_schema(self, name: str, schema: Dict[str, Any]) -> None:
+        """Register a JSON schema for validation."""
+        self._schemas[name] = schema
 
-        schema_file = self.schema_dir / f"{endpoint}.json"
-        if not schema_file.exists():
+    def validate_schema(
+        self, name: str, data: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Validate data against a registered schema."""
+        if name not in self._schemas:
             return None
 
-        with open(schema_file) as f:
-            schema = json.load(f)
-            self.schemas[endpoint] = schema
-            return schema
-
-    def generate_schema_from_openapi(self, openapi_spec: Dict) -> Dict[str, Dict]:
-        """Generate JSON Schema from OpenAPI specification."""
-        schemas = {}
-
-        for path, path_item in openapi_spec.get("paths", {}).items():
-            endpoint = path.lstrip("/").replace("/", "_")
-            schema = {"request": {}, "response": {}}
-
-            for method, operation in path_item.items():
-                if method.lower() not in ["get", "post", "put", "delete", "patch"]:
-                    continue
-
-                # Request schema
-                if "requestBody" in operation:
-                    content = operation["requestBody"].get("content", {})
-                    if "application/json" in content:
-                        schema["request"][method.lower()] = content[
-                            "application/json"
-                        ].get("schema", {})
-
-                # Response schema
-                if "responses" in operation:
-                    success_response = operation["responses"].get("200", {})
-                    content = success_response.get("content", {})
-                    if "application/json" in content:
-                        schema["response"][method.lower()] = content[
-                            "application/json"
-                        ].get("schema", {})
-
-            if schema["request"] or schema["response"]:
-                schemas[endpoint] = schema
-
-        return schemas
-
-    def save_schemas(self, schemas: Dict[str, Dict]) -> None:
-        """Save generated schemas to files."""
-        for endpoint, schema in schemas.items():
-            schema_file = self.schema_dir / f"{endpoint}.json"
-            with open(schema_file, "w") as f:
-                json.dump(schema, f, indent=2)
-
-    def validate_request(
-        self, endpoint: str, method: str, data: Optional[Dict] = None
-    ) -> None:
-        """Validate request data against the schema and custom validators."""
-        schema = self.load_schema(endpoint)
-        request_schema = None
-        if schema and "request" in schema:
-            request_schema = schema["request"].get(method.lower(), {})
-
+        schema = self._schemas[name]
         try:
-            # Validate against JSON Schema if schema is present
-            if request_schema:
-                validate(instance=data or {}, schema=request_schema)
+            validate(instance=data, schema=schema)
+            return None
+        except Exception as e:
+            return {"error": str(e)}
 
-            # Always run custom validators for fields present in data
-            if data:
-                for field, validator in self.custom_validators.items():
-                    if field in data:
-                        validator.validate(data)
-        except (ValidationError, ValueError) as e:
-            raise ValueError(f"Request validation failed: {str(e)}")
+    def on_request(
+        self,
+        method: str,
+        url: str,
+        params: Optional[Dict[str, Any]],
+        data: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Validate request data against registered schemas."""
+        if not data:
+            return None
 
-        # If we get here, validation passed
-        return None
+        # Extract schema name from URL or use default
+        schema_name = url.split("/")[-1]
+        if schema_name not in self._schemas:
+            return None
 
-    def validate_response(
-        self, endpoint: str, method: str, data: Optional[Dict] = None
-    ) -> None:
-        """Validate response data against the schema."""
-        schema = self.load_schema(endpoint)
-        if not schema or "response" not in schema:
-            return
+        return self.validate_schema(schema_name, data)
 
-        response_schema = schema["response"].get(method.lower(), {})
-        if not response_schema:
-            return
+    def on_response(self, response: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Validate response data against registered schemas."""
+        if not isinstance(response.get("data"), dict):
+            return None
 
-        try:
-            # Validate against JSON Schema
-            validate(instance=data or {}, schema=response_schema)
+        # Extract schema name from URL or use default
+        schema_name = response.get("url", "").split("/")[-1]
+        if schema_name not in self._schemas:
+            return None
 
-            # Run custom validators for fields present in data
-            if data:
-                for field, validator in self.custom_validators.items():
-                    if field in data:
-                        validator.validate(data)
-        except (ValidationError, ValueError) as e:
-            raise ValueError(f"Response validation failed: {str(e)}")
-
-        # If we get here, validation passed
-        return None
+        return self.validate_schema(schema_name, response["data"])
 
 
 # Create a global validator instance

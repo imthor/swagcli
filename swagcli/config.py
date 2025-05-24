@@ -1,6 +1,7 @@
-from typing import Dict, Optional
-from pathlib import Path
 import json
+from pathlib import Path
+from typing import Dict, Optional
+
 from pydantic import BaseModel, Field, SecretStr
 from rich.console import Console
 
@@ -57,8 +58,9 @@ class Config(BaseModel):
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         def default(obj):
-            from pydantic import SecretStr
             from pathlib import Path
+
+            from pydantic import SecretStr
 
             if isinstance(obj, SecretStr):
                 return obj.get_secret_value()

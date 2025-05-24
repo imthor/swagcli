@@ -1,5 +1,7 @@
-import pytest
 from pathlib import Path
+
+import pytest
+
 from swagcli.plugins import Plugin, PluginManager
 
 
@@ -49,7 +51,8 @@ def test_plugin_hooks(plugin_manager, tmp_path):
     plugin_dir.mkdir()
 
     plugin_file = plugin_dir / "test_plugin.py"
-    plugin_file.write_text("""
+    plugin_file.write_text(
+        """
 from swagcli.plugins import Plugin
 
 plugin = Plugin(
@@ -61,7 +64,8 @@ plugin = Plugin(
 
 def test_hook(*args, **kwargs):
     return "hook_result"
-    """)
+    """
+    )
 
     # Test plugin discovery
     plugin_manager.discover_plugins(plugin_dir)
@@ -78,7 +82,8 @@ def test_plugin_error_handling(plugin_manager, tmp_path):
     plugin_dir.mkdir()
 
     plugin_file = plugin_dir / "error_plugin.py"
-    plugin_file.write_text("""
+    plugin_file.write_text(
+        """
 from swagcli.plugins import Plugin
 
 plugin = Plugin(
@@ -90,7 +95,8 @@ plugin = Plugin(
 
 def error_hook():
     raise Exception("Test error")
-    """)
+    """
+    )
 
     # Test that errors in hooks don't crash the application
     plugin_manager.discover_plugins(plugin_dir)

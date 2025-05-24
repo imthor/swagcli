@@ -1,7 +1,9 @@
 import json
-import pytest
 from pathlib import Path
-from swagcli.plugins.validator import plugin, SchemaValidator, on_request, on_response
+
+import pytest
+
+from swagcli.plugins.validator import SchemaValidator
 
 
 @pytest.fixture
@@ -10,102 +12,60 @@ def schema_dir(tmp_path):
 
 
 @pytest.fixture
-def validator(schema_dir):
-    return SchemaValidator(schema_dir)
+def validator():
+    return SchemaValidator()
 
 
 @pytest.fixture
-def test_schema(schema_dir):
+def test_schema():
     schema = {
-        "request": {
-            "post": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "age": {"type": "integer", "minimum": 0},
-                },
-                "required": ["name"],
-            }
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "age": {"type": "integer", "minimum": 0},
         },
-        "response": {
-            "get": {
-                "type": "object",
-                "properties": {"id": {"type": "integer"}, "name": {"type": "string"}},
-                "required": ["id", "name"],
-            }
-        },
+        "required": ["name"],
     }
-
-    schema_file = schema_dir / "users.json"
-    schema_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(schema_file, "w") as f:
-        json.dump(schema, f)
-
     return schema
 
 
-def test_schema_loading(validator, test_schema):
-    schema = validator.load_schema("users")
-    assert schema == test_schema
+def test_register_and_validate_schema(validator, test_schema):
+    validator.register_schema("users", test_schema)
+    # Valid data
+    assert validator.validate_schema("users", {"name": "John", "age": 30}) is None
+    # Invalid data (missing required field)
+    result = validator.validate_schema("users", {"age": 30})
+    assert result is not None and "error" in result
+    # Invalid data (wrong type)
+    result = validator.validate_schema("users", {"name": "John", "age": "30"})
+    assert result is not None and "error" in result
 
 
-def test_request_validation(validator, test_schema):
-    # Valid request
-    validator.validate_request("users", "post", {"name": "John", "age": 30})
-
-    # Invalid request - missing required field
-    with pytest.raises(ValueError):
-        validator.validate_request("users", "post", {"age": 30})
-
-    # Invalid request - wrong type
-    with pytest.raises(ValueError):
-        validator.validate_request("users", "post", {"name": "John", "age": "30"})
-
-
-def test_response_validation(validator, test_schema):
-    # Valid response
-    validator.validate_response("users", "get", {"id": 1, "name": "John"})
-
-    # Invalid response - missing required field
-    with pytest.raises(ValueError):
-        validator.validate_response("users", "get", {"id": 1})
-
-    # Invalid response - wrong type
-    with pytest.raises(ValueError):
-        validator.validate_response("users", "get", {"id": "1", "name": "John"})
-
-
-def test_on_request_hook(validator, test_schema):
-    # Valid request
-    on_request(
-        "POST", "https://api.example.com/users", data={"name": "John", "age": 30}
+def test_on_request_and_on_response(validator, test_schema):
+    validator.register_schema("users", test_schema)
+    # on_request with valid data
+    assert (
+        validator.on_request("POST", "/users", None, {"name": "John", "age": 30})
+        is None
     )
-
-    # Invalid request - should print warning
-    on_request("POST", "https://api.example.com/users", data={"age": 30})
-
-
-def test_on_response_hook(validator, test_schema):
-    # Valid response
-    on_response(
-        {
-            "url": "https://api.example.com/users",
-            "method": "GET",
-            "data": {"id": 1, "name": "John"},
-        }
-    )
-
-    # Invalid response - should print warning
-    on_response(
-        {"url": "https://api.example.com/users", "method": "GET", "data": {"id": 1}}
-    )
+    # on_request with invalid data
+    result = validator.on_request("POST", "/users", None, {"age": 30})
+    assert result is not None and "error" in result
+    # on_response with valid data
+    response = {"url": "/users", "data": {"name": "John", "age": 30}}
+    assert validator.on_response(response) is None
+    # on_response with invalid data
+    response = {"url": "/users", "data": {"age": 30}}
+    result = validator.on_response(response)
+    assert result is not None and "error" in result
 
 
 def test_plugin_metadata():
-    assert plugin.name == "validator"
-    assert plugin.description == "Validates requests and responses using JSON Schema"
-    assert plugin.version == "1.0.0"
-    assert plugin.author == "SwagCli Team"
+    validator = SchemaValidator()
+    assert validator.name == "validator"
+    assert validator.description == "Validates requests and responses using JSON Schema"
+    assert validator.version == "1.0.0"
+    assert validator.author == "SwagCli Team"
 
 
 def test_custom_validator(validator):

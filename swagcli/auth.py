@@ -1,41 +1,131 @@
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, Union
+
+import aiohttp
 import jwt
 from pydantic import BaseModel, SecretStr
-import secrets
-import aiohttp
 
 
-class JWTAuth(BaseModel):
-    secret: SecretStr
-    algorithm: str = "HS256"
-    expires_in: int = 3600  # 1 hour
-    issuer: Optional[str] = None
-    audience: Optional[str] = None
+class AuthConfig(BaseModel):
+    type: str
+    username: Optional[str] = None
+    password: Optional[SecretStr] = None
+    api_key: Optional[SecretStr] = None
+    api_key_header: Optional[str] = None
+    token: Optional[SecretStr] = None
+    token_url: Optional[str] = None
+    client_id: Optional[str] = None
+    client_secret: Optional[SecretStr] = None
+    scope: Optional[str] = None
 
-    def generate_token(self, claims: Optional[Dict] = None) -> str:
+
+class BasicAuth:
+    def __init__(self, username: str, password: SecretStr) -> None:
+        self.username = username
+        self.password = password
+
+    def get_headers(self) -> Dict[str, str]:
+        auth_str = f"{self.username}:{self.password.get_secret_value()}"
+        return {
+            "Authorization": f"Basic {base64.b64encode(auth_str.encode()).decode()}"
+        }
+
+
+class ApiKeyAuth:
+    def __init__(self, api_key: SecretStr, header_name: str = "X-API-Key") -> None:
+        self.api_key = api_key
+        self.header_name = header_name
+
+    def get_headers(self) -> Dict[str, str]:
+        return {self.header_name: self.api_key.get_secret_value()}
+
+
+class OAuth2Auth:
+    def __init__(
+        self,
+        token_url: str,
+        client_id: str,
+        client_secret: SecretStr,
+        scope: Optional[str] = None,
+    ) -> None:
+        self.token_url = token_url
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.scope = scope
+        self._token: Optional[str] = None
+        self._token_expiry: Optional[datetime] = None
+
+    def get_headers(self) -> Dict[str, str]:
+        if not self._token or (
+            self._token_expiry and datetime.now() >= self._token_expiry
+        ):
+            self._refresh_token()
+        return {"Authorization": f"Bearer {self._token}"}
+
+    def _refresh_token(self) -> None:
+        async def get_token() -> str:
+            async with aiohttp.ClientSession() as session:
+                data = {
+                    "grant_type": "client_credentials",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret.get_secret_value(),
+                }
+                if self.scope:
+                    data["scope"] = self.scope
+
+                async with session.post(self.token_url, data=data) as response:
+                    token_data = await response.json()
+                    self._token = token_data["access_token"]
+                    if "expires_in" in token_data:
+                        self._token_expiry = datetime.now() + timedelta(
+                            seconds=token_data["expires_in"]
+                        )
+                    return self._token
+
+        self._token = asyncio.run(get_token())
+
+
+class JWTAuth:
+    def __init__(
+        self,
+        secret: Union[str, SecretStr],
+        algorithm: str = "HS256",
+        expires_in: int = 3600,
+        issuer: str = None,
+        audience: str = None,
+    ) -> None:
+        if isinstance(secret, SecretStr):
+            self.secret = secret
+        else:
+            self.secret = SecretStr(secret)
+        self.algorithm = algorithm
+        self.expires_in = expires_in
+        self.issuer = issuer
+        self.audience = audience
+
+    def generate_token(self, claims: Optional[Dict[str, Any]] = None) -> str:
         now = datetime.utcnow()
         token_claims = {
             "iat": now,
             "exp": now + timedelta(seconds=self.expires_in),
             **(claims or {}),
         }
-
         if self.issuer:
             token_claims["iss"] = self.issuer
         if self.audience:
             token_claims["aud"] = self.audience
-
         return jwt.encode(
             token_claims, self.secret.get_secret_value(), algorithm=self.algorithm
         )
 
-    def verify_token(self, token: str) -> Dict:
+    def verify_token(self, token: str) -> Dict[str, Any]:
         return jwt.decode(
             token,
             self.secret.get_secret_value(),
@@ -44,56 +134,57 @@ class JWTAuth(BaseModel):
             audience=self.audience,
         )
 
-
-class AWSAuth(BaseModel):
-    access_key: str
-    secret_key: SecretStr
-    region: str
-    service: str
-
-    def _get_signature_key(self, date_stamp: str) -> bytes:
-        k_date = self._sign(
-            ("AWS4" + self.secret_key.get_secret_value()).encode("utf-8"), date_stamp
+    def get_headers(self, payload: Dict[str, Any]) -> Dict[str, str]:
+        token = jwt.encode(
+            payload,
+            self.secret.get_secret_value(),
+            algorithm=self.algorithm,
         )
-        k_region = self._sign(k_date, self.region)
-        k_service = self._sign(k_region, self.service)
-        k_signing = self._sign(k_service, "aws4_request")
-        return k_signing
+        return {"Authorization": f"Bearer {token}"}
 
-    def _sign(self, key: bytes, msg: str) -> bytes:
-        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
-    def get_auth_headers(
+class AWSAuth:
+    def __init__(
+        self,
+        access_key: str,
+        secret_key: Union[str, SecretStr],
+        region: str,
+        service: str,
+    ) -> None:
+        self.access_key = access_key
+        if isinstance(secret_key, SecretStr):
+            self.secret_key = secret_key
+        else:
+            self.secret_key = SecretStr(secret_key)
+        self.region = region
+        self.service = service
+
+    def get_headers(
         self,
         method: str,
         path: str,
-        query_params: Optional[Dict] = None,
-        headers: Optional[Dict] = None,
-        body: Optional[bytes] = None,
+        query_params: Optional[Dict[str, str]] = None,
+        **kwargs,
     ) -> Dict[str, str]:
-        t = datetime.utcnow()
-        amz_date = t.strftime("%Y%m%dT%H%M%SZ")
-        date_stamp = t.strftime("%Y%m%d")
+        # AWS Signature Version 4
+        now = datetime.utcnow()
+        amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+        date_stamp = now.strftime("%Y%m%d")
 
-        # Prepare canonical request
+        # Canonical request
         canonical_uri = path
-        canonical_querystring = "&".join(
-            f"{k}={v}" for k, v in sorted((query_params or {}).items())
-        )
+        canonical_querystring = ""
+        if query_params:
+            canonical_querystring = "&".join(
+                f"{k}={v}" for k, v in sorted(query_params.items())
+            )
 
-        headers = headers or {}
-        headers["host"] = headers.get(
-            "host", f"{self.service}.{self.region}.amazonaws.com"
-        )
-        headers["x-amz-date"] = amz_date
+        host = f"{self.service}.{self.region}.amazonaws.com"
+        canonical_headers = f"host:{host}\nx-amz-date:{amz_date}\n"
 
-        canonical_headers = "\n".join(
-            f"{k.lower()}:{v}" for k, v in sorted(headers.items())
-        )
+        signed_headers = "host;x-amz-date"
 
-        signed_headers = ";".join(k.lower() for k in sorted(headers.keys()))
-
-        payload_hash = hashlib.sha256(body or b"").hexdigest()
+        payload_hash = hashlib.sha256("".encode()).hexdigest()
 
         canonical_request = "\n".join(
             [
@@ -106,7 +197,7 @@ class AWSAuth(BaseModel):
             ]
         )
 
-        # Prepare string to sign
+        # String to sign
         algorithm = "AWS4-HMAC-SHA256"
         credential_scope = f"{date_stamp}/{self.region}/{self.service}/aws4_request"
         string_to_sign = "\n".join(
@@ -114,29 +205,31 @@ class AWSAuth(BaseModel):
                 algorithm,
                 amz_date,
                 credential_scope,
-                hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+                hashlib.sha256(canonical_request.encode()).hexdigest(),
             ]
         )
 
         # Calculate signature
-        signing_key = self._get_signature_key(date_stamp)
+        def sign(key: bytes, msg: str) -> bytes:
+            return hmac.new(key, msg.encode(), hashlib.sha256).digest()
+
+        k_date = sign(f"AWS4{self.secret_key.get_secret_value()}".encode(), date_stamp)
+        k_region = sign(k_date, self.region)
+        k_service = sign(k_region, self.service)
+        k_signing = sign(k_service, "aws4_request")
         signature = hmac.new(
-            signing_key, string_to_sign.encode("utf-8"), hashlib.sha256
+            k_signing, string_to_sign.encode(), hashlib.sha256
         ).hexdigest()
 
-        # Prepare authorization header
-        authorization_header = (
-            f"{algorithm} "
-            f"Credential={self.access_key}/{credential_scope}, "
-            f"SignedHeaders={signed_headers}, "
-            f"Signature={signature}"
-        )
-
+        # Return headers
         return {
-            "Authorization": authorization_header,
+            "Authorization": f"{algorithm} Credential={self.access_key}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}",
             "X-Amz-Date": amz_date,
-            **headers,
+            "host": host,
         }
+
+    def get_auth_headers(self, *args, **kwargs) -> Dict[str, str]:
+        return self.get_headers(*args, **kwargs)
 
 
 class OAuth2PKCEAuth(BaseModel):

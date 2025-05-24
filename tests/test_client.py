@@ -1,12 +1,14 @@
-import pytest
-from unittest.mock import AsyncMock, patch
-from swagcli.client import APIClient
-from swagcli.config import Config, AuthConfig
-from swagcli.models import APIResponse
-import tempfile
-import shutil
 import os
+import shutil
+import tempfile
+from unittest.mock import AsyncMock, patch
+
 import aiohttp
+import pytest
+
+from swagcli.client import APIClient
+from swagcli.config import AuthConfig, Config
+from swagcli.models import APIResponse
 
 
 @pytest.fixture

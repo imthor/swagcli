@@ -2,10 +2,25 @@
 This is where all the magic happens
 """
 
+import json
 import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
 import click
 import requests
+import typer
+from rich.console import Console
+from rich.panel import Panel
+from typer import Option
+
+from .client import APIClient
 from .commandstore import CommandStore
+from .config import Config
+from .models import APIResponse
+
+app = typer.Typer()
+console = Console()
 
 
 class Swagcli:
@@ -342,3 +357,97 @@ class Swagcli:
         """
         self._parse_paths()
         self._start()
+
+
+def load_config(config_path: Optional[Path] = None) -> Config:
+    """Load configuration from file or environment."""
+    if config_path and config_path.exists():
+        with open(config_path) as f:
+            return Config.model_validate_json(f.read())
+    return Config()
+
+
+@app.command()
+def request(
+    method: str = Option(..., help="HTTP method (GET, POST, PUT, DELETE)"),
+    path: str = Option(..., help="API endpoint path"),
+    data: Optional[str] = Option(None, help="Request data (JSON string)"),
+    params: Optional[str] = Option(None, help="Query parameters (JSON string)"),
+    config_path: Optional[Path] = Option(None, help="Path to config file"),
+    show_progress: bool = Option(False, help="Show progress bar"),
+) -> None:
+    """Make an API request."""
+    config = load_config(config_path)
+    client = APIClient(config)
+
+    try:
+        payload: Dict[str, Any] = {}
+        if data:
+            payload = json.loads(data)
+
+        query_params: Optional[Dict[str, Any]] = None
+        if params:
+            query_params = json.loads(params)
+
+        async def make_request() -> APIResponse:
+            async with client:
+                if method.upper() == "GET":
+                    return await client.get(
+                        path,
+                        params=query_params,
+                        show_progress=show_progress,
+                    )
+                elif method.upper() == "POST":
+                    return await client.post(
+                        path,
+                        data=payload,
+                        show_progress=show_progress,
+                    )
+                elif method.upper() == "PUT":
+                    return await client.put(
+                        path,
+                        data=payload,
+                        show_progress=show_progress,
+                    )
+                elif method.upper() == "DELETE":
+                    return await client.delete(
+                        path,
+                        params=query_params,
+                        show_progress=show_progress,
+                    )
+                else:
+                    raise ValueError(f"Unsupported HTTP method: {method}")
+
+        response = typer.run_async(make_request())
+        console.print(Panel(str(response.data), title="Response"))
+
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {str(e)}")
+        raise typer.Exit(1)
+
+
+@app.command()
+def validate(
+    schema_path: Path = Option(..., help="Path to JSON schema file"),
+    data_path: Path = Option(..., help="Path to data file to validate"),
+) -> None:
+    """Validate data against a JSON schema."""
+    try:
+        with open(schema_path) as f:
+            schema = json.load(f)
+        with open(data_path) as f:
+            data = json.load(f)
+
+        from jsonschema import validate
+
+        validate(instance=data, schema=schema)
+        console.print("[green]Validation successful![/green]")
+
+    except Exception as e:
+        console.print(f"[red]Validation failed:[/red] {str(e)}")
+        raise typer.Exit(1)
+
+
+def main() -> typer.Typer:
+    """Main entry point for the CLI."""
+    return app

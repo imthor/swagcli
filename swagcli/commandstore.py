@@ -3,7 +3,8 @@ Implements the CommandStore, a tree data structure to store the commands
 """
 
 import re
-from anytree import NodeMixin, RenderTree, PreOrderIter
+
+from anytree import NodeMixin, PreOrderIter, RenderTree
 
 
 class NodeBase:

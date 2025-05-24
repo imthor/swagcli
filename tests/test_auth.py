@@ -1,7 +1,9 @@
-import pytest
 from datetime import datetime, timedelta
-from swagcli.auth import JWTAuth, AWSAuth, OAuth2PKCEAuth, AzureADAuth
+
 import aiohttp
+import pytest
+
+from swagcli.auth import AWSAuth, AzureADAuth, JWTAuth, OAuth2PKCEAuth
 
 
 @pytest.fixture

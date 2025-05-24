@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
+
 import pytest
-from swagcli.config import Config, AuthConfig, CacheConfig
+
+from swagcli.config import AuthConfig, CacheConfig, Config
 
 
 def test_config_creation():

@@ -4,7 +4,8 @@ Demonstrates custom validators and schema handling
 """
 
 import json
-from swagcli import Swagcli, Config
+
+from swagcli import Config, Swagcli
 from swagcli.plugins.validator import SchemaValidator
 
 

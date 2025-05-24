@@ -3,6 +3,7 @@ Sample cli for swagger petstore
 """
 
 import json
+
 from swagcli import Swagcli
 
 
